@@ -1,0 +1,158 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: #f4f6f5;
+  color: #1e2a24;
+}
+
+.app { max-width: 900px; margin: 0 auto; padding: 24px 16px 64px; }
+
+header { text-align: center; margin-bottom: 24px; }
+header h1 { margin: 0; color: #1a6b3c; font-size: 2rem; }
+.subtitle { color: #5a6b62; margin-top: 4px; }
+
+.card {
+  background: white;
+  border-radius: 10px;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+.card h2 { margin-top: 0; color: #1a6b3c; font-size: 1.2rem; }
+.card h3 { color: #2c463a; font-size: 1rem; margin-top: 24px; }
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+label { display: flex; flex-direction: column; font-size: 0.85rem; color: #3a4a42; gap: 4px; }
+.optional { font-weight: normal; color: #999; font-size: 0.75rem; }
+
+input, select {
+  padding: 8px 10px;
+  border: 1px solid #cdd8d2;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.disease-list { margin-top: 18px; }
+.field-label { font-size: 0.85rem; color: #3a4a42; margin-bottom: 6px; }
+.checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid #e2e8e5;
+  border-radius: 6px;
+  padding: 10px;
+}
+.checkbox-item { flex-direction: row; align-items: center; gap: 8px; font-size: 0.82rem; }
+
+.food-search { position: relative; margin-bottom: 16px; }
+.food-search input { width: 100%; padding: 10px 12px; }
+.search-results {
+  position: absolute;
+  top: 100%; left: 0; right: 0;
+  background: white;
+  border: 1px solid #d3ded8;
+  border-radius: 6px;
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+.search-results li {
+  padding: 8px 12px;
+  display: flex;
+  justify-content: space-between;
+  cursor: pointer;
+}
+.search-results li:hover { background: #eef7f0; }
+.food-group-tag { color: #7c8a83; font-size: 0.78rem; }
+
+.entries-table, .nutrient-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.entries-table th, .entries-table td,
+.nutrient-table th, .nutrient-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #edf1ef;
+}
+.entries-table input, .entries-table select { width: 100%; padding: 5px; }
+.remove-btn {
+  background: none; border: none; color: #c0392b; cursor: pointer; font-size: 1rem;
+}
+.empty-state { color: #8a978f; font-style: italic; }
+
+.action-row { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+.analyze-btn {
+  background: #1a6b3c;
+  color: white;
+  border: none;
+  padding: 12px 28px;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+.analyze-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.error-text { color: #c0392b; font-size: 0.9rem; }
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.stat {
+  background: #f6faf7;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+}
+.stat-label { font-size: 0.75rem; color: #6f7d76; }
+.stat-value { font-size: 1.3rem; font-weight: 600; color: #1a6b3c; }
+.stat-sub { font-size: 0.78rem; color: #7c8a83; }
+
+.req-row { margin: 10px 0; font-size: 0.92rem; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.status-deficient { background: #fdecea; color: #c0392b; }
+.status-adequate { background: #e8f6ec; color: #1a6b3c; }
+.status-excess { background: #fff4e0; color: #a9660b; }
+.status-unknown { background: #eef0f0; color: #7c8a83; }
+
+.goal-block { margin: 10px 0; padding: 10px 14px; background: #f6faf7; border-radius: 6px; }
+.goal-text { white-space: pre-line; margin: 4px 0 0; font-size: 0.88rem; color: #3a4a42; }
+
+.data-gaps { margin-top: 20px; padding: 12px 16px; background: #fff8e6; border-radius: 8px; }
+.data-gaps h3 { margin-top: 0; color: #a9660b; }
+.data-gaps ul { margin: 6px 0 0; padding-left: 20px; font-size: 0.85rem; }
+
+.secondary-btn { background: #2c6e91; }
+
+.meal-block { margin-bottom: 18px; }
+.meal-items { list-style: none; padding: 0; margin: 6px 0 0; }
+.meal-items li { padding: 6px 0; border-bottom: 1px solid #edf1ef; font-size: 0.9rem; }
+.meal-role {
+  display: inline-block; min-width: 70px; text-transform: capitalize;
+  color: #2c6e91; font-weight: 600; font-size: 0.78rem; margin-right: 8px;
+}
