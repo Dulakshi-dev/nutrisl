@@ -6,7 +6,7 @@ the disease-specific nutrition goals table, into one report per profile+diary.
 """
 from .anthropometrics import full_anthropometrics, calc_bmr, calc_tee, parse_factor_range
 from .db import get_conn
-from .dri_lookup import lookup_vitamin, lookup_mineral, lookup_protein, lookup_energy
+from .dri_lookup import lookup_vitamin, lookup_mineral, lookup_protein, lookup_energy, lookup_fibre
 from .nutrient_mapping import CANONICAL_NUTRIENTS, MACRO_CODES, sum_aliases
 from .profile import UserProfile
 from .schemas import IntakeResult, NutrientStatus, DeficiencyReport
@@ -176,6 +176,33 @@ def analyze(profile: UserProfile, intake: IntakeResult) -> DeficiencyReport:
             status=status, note=note,
         ))
 
+    # --- Dietary fibre (has a direct gram/day target in your DRI data — unlike total
+    # carbohydrate and fat, which are %-of-energy ranges needing an extra conversion
+    # step; that's flagged as a known gap below rather than implemented under time
+    # pressure right before nutritionist review) ---
+    fibre_row = lookup_fibre(conn, profile)
+    fibre_intake = sum_aliases(intake.nutrient_totals, [MACRO_CODES["Total Dietary Fibre"]])
+    fibre_block = None
+    if fibre_row and fibre_row.get("dietary_fibre_g_day") is not None:
+        target = fibre_row["dietary_fibre_g_day"]
+        fibre_block = {
+            "intake_g": fibre_intake, "target_g_day": target,
+            "status": "Deficient" if fibre_intake < target else "Adequate",
+        }
+    else:
+        data_gaps.append(
+            "No dietary fibre target found for this profile (pregnancy/lactation have "
+            "no fibre-specific row in the DRI data — only a general adult figure exists)."
+        )
+    data_gaps.append(
+        "Total Carbohydrate, Total Fat, and Water DRI data exist in your database "
+        "(dri_carbs_fibre, dri_fat_fatty_acids, dri_water) but are NOT YET assessed here: "
+        "carb/fat targets are %-of-energy ranges requiring conversion via an energy "
+        "target (not yet implemented), and water DRI reflects total fluid intake, which "
+        "a food diary alone systematically understates (it only captures water contained "
+        "in food, not drinks) — comparing the two would be misleading rather than useful."
+    )
+
     # --- Disease-specific nutrition goals (objective 3 tie-in to objective 4) ---
     disease_goals = []
     for disease in profile.diseases:
@@ -198,6 +225,7 @@ def analyze(profile: UserProfile, intake: IntakeResult) -> DeficiencyReport:
         anthropometrics=anthro,
         energy_requirement=energy_block,
         protein_requirement=protein_block,
+        fibre_requirement=fibre_block,
         nutrient_status=nutrient_status,
         disease_nutrition_goals=disease_goals,
         data_gaps=data_gaps,

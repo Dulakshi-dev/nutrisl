@@ -11,7 +11,7 @@ function StatusBadge({ status }) {
 
 export default function ResultsPanel({ report }) {
   if (!report) return null;
-  const { anthropometrics: a, energy_requirement, protein_requirement, nutrient_status, disease_nutrition_goals, data_gaps } = report;
+  const { anthropometrics: a, energy_requirement, protein_requirement, fibre_requirement, nutrient_status, disease_nutrition_goals, data_gaps } = report;
 
   return (
     <section className="card results">
@@ -60,6 +60,13 @@ export default function ResultsPanel({ report }) {
           <strong>Protein:</strong> {protein_requirement.intake_g} g consumed vs{" "}
           {protein_requirement.rda_total_g_day ?? "?"} g RDA{" "}
           <StatusBadge status={protein_requirement.status} />
+        </div>
+      )}
+      {fibre_requirement && (
+        <div className="req-row">
+          <strong>Dietary Fibre:</strong> {fibre_requirement.intake_g} g consumed vs{" "}
+          {fibre_requirement.target_g_day} g target{" "}
+          <StatusBadge status={fibre_requirement.status} />
         </div>
       )}
 

@@ -50,6 +50,7 @@ class DeficiencyReport(BaseModel):
     anthropometrics: dict
     energy_requirement: dict | None
     protein_requirement: dict | None
+    fibre_requirement: dict | None
     nutrient_status: list[NutrientStatus]
     disease_nutrition_goals: list[dict]  # [{disease_condition, nutrition_goal_text}]
     data_gaps: list[str]  # things the report could NOT evaluate and why

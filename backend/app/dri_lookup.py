@@ -56,7 +56,12 @@ def row_matches_profile(life_stage_text: str | None, sex: str | None, profile: U
     low = life_stage_text.lower()
 
     is_pregnancy_row = "pregnan" in low or "trimester" in low
-    is_lactation_row = "lactation" in low or " pp" in low or "postpartum" in low
+    # dri_energy phrases its lactation row as "First 6 months" (no "lactation"/"PP"/
+    # "postpartum" keyword at all) — distinct from an infant's "0-6 months" age row,
+    # which never has the word "first" attached. Confirmed by inspecting the actual
+    # ingested table content; without this, lactating profiles silently got zero
+    # energy-DRI matches even though the row exists.
+    is_lactation_row = "lactation" in low or " pp" in low or "postpartum" in low or "first 6 month" in low
 
     if is_pregnancy_row:
         if profile.physiological_status not in (
@@ -128,3 +133,15 @@ def lookup_energy(conn, profile: UserProfile):
         if row["pal_activity"] == profile.pal_category:
             return dict(row)
     return dict(candidates[0])
+
+
+def lookup_fibre(conn, profile: UserProfile):
+    """dri_carbs_fibre.dietary_fibre_g_day is a direct gram/day target — unlike
+    total_carb_pct_e (a %-of-energy range needing conversion via an energy target,
+    not yet implemented — see meal_planning module docstring for why that's flagged
+    as a known gap rather than rushed)."""
+    rows = conn.execute("SELECT * FROM dri_carbs_fibre").fetchall()
+    for row in rows:
+        if row_matches_profile(row["age_group"], row["sex"], profile):
+            return dict(row)
+    return None
