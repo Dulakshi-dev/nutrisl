@@ -12,6 +12,7 @@ DietaryPreference = Literal["none", "vegetarian", "vegan", "pescatarian"]
 
 
 class UserProfile(BaseModel):
+    patient_code: str | None = Field(None, description="Anonymous patient code (matches the evaluation questionnaire).")
     age_years: float = Field(..., ge=0, le=120)
     sex: Literal["Male", "Female"]
     weight_kg: float = Field(..., gt=0)

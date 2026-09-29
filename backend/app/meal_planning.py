@@ -22,6 +22,7 @@ feeding (Galactocemia in neonates) — those two are refused outright rather tha
 faked, see PKU_DISEASE / INFANT_ONLY_DISEASE below.
 """
 from .calculator import calculate_intake
+from .conditions import EXTRA_CONDITIONS, TUBE_FEEDING_DISEASE
 from .db import get_conn
 from .deficiency import analyze
 from .nutrient_mapping import MACRO_CODES
@@ -109,6 +110,12 @@ DISEASE_RULES = {
     },
 }
 
+# Questionnaire conditions (Overweight/obesity, T2DM, hypercholesterolemia, stenting, IBS, ...)
+DISEASE_RULES.update({k: v["rules"] for k, v in EXTRA_CONDITIONS.items()})
+# Burns: energy demand is raised as well as protein (heuristic, flagged in `unsupported`)
+DISEASE_RULES["Severe Burns/ after major surgery"]["energy_target_multiplier"] = 1.2
+DISEASE_RULES["Diabetes + severe burn"]["energy_target_multiplier"] = 1.2
+
 PKU_DISEASE = "Phenylketone uria"
 INFANT_ONLY_DISEASE = "Galactocemia in neonates"
 
@@ -183,11 +190,20 @@ OMEGA6_CODES = ["F18D2CN6", "F20D4N6"]
 OMEGA3_CODES = ["F18D3N3", "F20D5N3", "F22D5N3", "F22D6N3"]
 
 
+def sum_energy(intake) -> float:
+    return sum(n.total_value for n in intake.nutrient_totals if n.nutrient_code == MACRO_CODES["Energy"])
+
+
+def sum_protein(intake) -> float:
+    return sum(n.total_value for n in intake.nutrient_totals if n.nutrient_code == MACRO_CODES["Protein"])
+
+
 def _merge_rules(diseases: list[str]) -> dict:
     """Union hard filters (most restrictive wins), sum soft bonuses across selected diseases."""
     merged = {
         "max_sodium_mg_100g": None, "max_potassium_mg_100g": None, "max_phosphorus_mg_100g": None,
         "max_fat_g_100g": None, "max_fiber_g_100g": None, "max_gi": None,
+        "max_sat_fat_mg_100g": None, "max_cholesterol_mg_100g": None, "energy_target_multiplier": 1.0,
         "fiber_bonus_weight": 0.0, "carb_penalty_weight": 0.0, "boost_omega3": False,
         "prefer_protein_groups": False, "exclude_food_groups": set(), "exclude_name_keywords": set(),
         "keep_name_keywords": set(), "boost_name_keywords": set(),
@@ -199,10 +215,12 @@ def _merge_rules(diseases: list[str]) -> dict:
         if not rules:
             continue
         for cap_key in ("max_sodium_mg_100g", "max_potassium_mg_100g", "max_phosphorus_mg_100g",
-                         "max_fat_g_100g", "max_fiber_g_100g", "max_gi"):
+                         "max_fat_g_100g", "max_fiber_g_100g", "max_gi",
+                         "max_sat_fat_mg_100g", "max_cholesterol_mg_100g"):
             if rules.get(cap_key) is not None:
                 cur = merged[cap_key]
                 merged[cap_key] = rules[cap_key] if cur is None else min(cur, rules[cap_key])
+        merged["energy_target_multiplier"] *= rules.get("energy_target_multiplier", 1.0)
         merged["fiber_bonus_weight"] = max(merged["fiber_bonus_weight"], rules.get("fiber_bonus_weight", 0.0))
         merged["carb_penalty_weight"] = max(merged["carb_penalty_weight"], rules.get("carb_penalty_weight", 0.0))
         merged["boost_omega3"] = merged["boost_omega3"] or rules.get("boost_omega3", False)
@@ -270,6 +288,13 @@ def _fetch_candidates(conn, profile: UserProfile, rules: dict) -> list[dict]:
             continue
         fiber = nutrients.get(MACRO_CODES["Total Dietary Fibre"])
         if rules["max_fiber_g_100g"] is not None and fiber is not None and fiber > rules["max_fiber_g_100g"]:
+            continue
+
+        satfat = nutrients.get("FASAT")
+        if rules["max_sat_fat_mg_100g"] is not None and satfat is not None and satfat > rules["max_sat_fat_mg_100g"]:
+            continue
+        chol = nutrients.get("CHOLC")
+        if rules["max_cholesterol_mg_100g"] is not None and chol is not None and chol > rules["max_cholesterol_mg_100g"]:
             continue
 
         candidates.append({"food_code": code, "food_name": name, "food_group": group, "nutrients": nutrients})
@@ -363,6 +388,16 @@ def generate_meal_plan(profile: UserProfile, diary: DiaryInput) -> MealPlanResul
             meals={}, items=[], validation=None, limitations=[],
         )
 
+    if TUBE_FEEDING_DISEASE in profile.diseases:
+        return MealPlanResult(
+            generated=False,
+            reason="Tube feeding is delivered as enteral formula or a blenderised feed prescribed by a "
+                   "clinician (volume, osmolarity and viscosity matter). A solid-food rice-and-curry plan "
+                   "would be unsafe, so none is generated. Use 'Analyze intake' to check what the feed "
+                   "provides (enter it as diary items) against the patient's requirements.",
+            meals={}, items=[], validation=None, limitations=[],
+        )
+
     conn = get_conn()
     rules = _merge_rules(profile.diseases)
 
@@ -414,16 +449,47 @@ def generate_meal_plan(profile: UserProfile, diary: DiaryInput) -> MealPlanResul
                 all_items.append(item)
         meals[meal_name] = meal_items
 
+    def _run(items):
+        d = DiaryInput(entries=[
+            {"food_code": it.food_code, "quantity": it.grams, "unit": "g", "meal": it.meal} for it in items
+        ])
+        return calculate_intake(d)
+
+    # Portion scaling: standard portions are adult-sized, so scale them to this patient's energy
+    # target (DRI energy AR x condition multiplier). Fixes child/elderly portions being too large
+    # and underweight/obesity plans not reflecting their energy goal.
+    target_kcal = None
+    scale = 1.0
+    ar = (deficiency_report.energy_requirement or {}).get("dri_ar_kcal_day")
+    if ar:
+        target_kcal = round(float(ar) * rules["energy_target_multiplier"])
+        plan_kcal = sum_energy(_run(all_items))
+        if plan_kcal > 0:
+            scale = max(0.4, min(2.0, target_kcal / plan_kcal))
+            for it in all_items:
+                it.grams = max(5.0, round(it.grams * scale / 5) * 5)
+        # protein top-up on protein-role items if still under the (condition-adjusted) target
+        prot_row = deficiency_report.protein_requirement or {}
+        prot_target = (prot_row.get("rda_total_g_day") or 0) * rules["protein_target_multiplier"]
+        prot_now = sum_protein(_run(all_items))
+        if prot_target and prot_now < 0.95 * prot_target:
+            boost = min(1.6, prot_target / max(prot_now, 1e-6))
+            for it in all_items:
+                if "protein" in it.role:
+                    it.grams = round(it.grams * boost / 5) * 5
+
     # Closed-loop validation: run the generated plan back through the same calculator+analyzer
-    validation_diary = DiaryInput(entries=[
-        {"food_code": it.food_code, "quantity": it.grams, "unit": "g", "meal": it.meal}
-        for it in all_items
-    ])
-    validation_intake = calculate_intake(validation_diary)
+    validation_intake = _run(all_items)
     validation_report = analyze(profile, validation_intake)
 
     limitations = list(dict.fromkeys(rules["unsupported"]))  # de-dupe, preserve order
     limitations.insert(0, RAW_INGREDIENT_DISCLAIMER)
+    if target_kcal:
+        limitations.insert(1, (
+            f"Portions were scaled (x{scale:.2f}) so the plan supplies about {target_kcal} kcal/day "
+            f"(DRI energy requirement adjusted for the selected condition). Portion weights are "
+            f"generic estimates, not validated Sri Lankan household measures."
+        ))
     if rules["max_gi"] is not None:
         limitations.append(
             f"GI/GL reference matched by food name only (not linked by code) — "
@@ -437,4 +503,5 @@ def generate_meal_plan(profile: UserProfile, diary: DiaryInput) -> MealPlanResul
     return MealPlanResult(
         generated=True, reason=None, meals=meals, items=all_items,
         validation=validation_report, limitations=limitations,
+        target_energy_kcal=target_kcal, portion_scale_factor=round(scale, 2),
     )

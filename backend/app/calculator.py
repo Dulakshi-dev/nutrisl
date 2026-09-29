@@ -9,7 +9,12 @@ from collections import defaultdict
 
 from .db import get_conn
 from .portions import to_grams, PortionConversionError
+from .nutrient_mapping import MACRO_CODES
 from .schemas import DiaryInput, EntryResolution, IntakeResult, NutrientTotal
+
+
+# Nutrients a nutritionist checks by hand (questionnaire): label -> food_nutrients code
+KEY_CODES = {**MACRO_CODES, "Sodium": "NA", "Potassium": "K", "Calcium": "CA", "Iron": "FE"}
 
 
 def calculate_intake(diary: DiaryInput) -> IntakeResult:
@@ -18,6 +23,7 @@ def calculate_intake(diary: DiaryInput) -> IntakeResult:
 
     resolved: list[EntryResolution] = []
     unresolved: list[dict] = []
+    breakdown: list[dict] = []
     totals: dict[str, float] = defaultdict(float)
 
     for entry in diary.entries:
@@ -53,8 +59,14 @@ def calculate_intake(diary: DiaryInput) -> IntakeResult:
             "SELECT nutrient_code, value FROM food_nutrients WHERE food_code = ?",
             (entry.food_code,),
         ).fetchall()
+        vals = {}
         for nrow in nutrient_rows:
             totals[nrow["nutrient_code"]] += nrow["value"] * scale
+            vals[nrow["nutrient_code"]] = nrow["value"] * scale
+        breakdown.append({
+            "food_code": entry.food_code, "food_name": food_row["food_name"], "grams": round(grams, 1),
+            "values": {label: round(vals.get(code, 0.0), 2) for label, code in KEY_CODES.items()},
+        })
 
     # attach names/units from the dictionary
     nutrient_totals: list[NutrientTotal] = []
@@ -78,6 +90,7 @@ def calculate_intake(diary: DiaryInput) -> IntakeResult:
         resolved_entries=resolved,
         nutrient_totals=nutrient_totals,
         unresolved_entries=unresolved,
+        entry_breakdown=breakdown,
     )
 
 

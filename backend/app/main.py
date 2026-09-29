@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .calculator import calculate_intake, search_foods
+from .conditions import EXTRA_CONDITIONS
 from .db import get_conn
 from .deficiency import analyze
 from .meal_planning import generate_meal_plan
@@ -95,7 +96,7 @@ def list_diseases():
         "SELECT DISTINCT disease_condition FROM disease_nutrition_goals ORDER BY disease_condition"
     ).fetchall()
     conn.close()
-    return [r["disease_condition"] for r in rows]
+    return sorted({r["disease_condition"] for r in rows} | set(EXTRA_CONDITIONS))
 
 
 @app.get("/activity-levels")

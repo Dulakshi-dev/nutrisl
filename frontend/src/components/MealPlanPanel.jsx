@@ -1,3 +1,5 @@
+import { buildEvaluationRows, downloadCsv } from "../exportCsv";
+
 const MEAL_LABELS = {
   breakfast: "Breakfast", lunch: "Lunch", dinner: "Dinner",
   beverage: "Beverage", dessert: "Dessert / Fruit",
@@ -21,6 +23,11 @@ export default function MealPlanPanel({ plan }) {
   return (
     <section className="card">
       <h2>Generated meal plan</h2>
+      {plan.target_energy_kcal && (
+        <p className="stat-sub">
+          Target energy ≈ {plan.target_energy_kcal} kcal/day · portions scaled ×{plan.portion_scale_factor}
+        </p>
+      )}
       {Object.entries(plan.meals).map(([meal, items]) => (
         items.length > 0 && (
           <div key={meal} className="meal-block">
@@ -37,6 +44,29 @@ export default function MealPlanPanel({ plan }) {
           </div>
         )
       ))}
+
+      {plan.validation && (
+        <>
+          <h3>Nutrient check of this plan</h3>
+          <table className="nutrient-table">
+            <thead><tr><th>Nutrient</th><th>Provided</th><th>Reference</th><th>Status</th></tr></thead>
+            <tbody>
+              {buildEvaluationRows(plan.validation, "Meal plan").map((r) => (
+                <tr key={r[1]}><td>{r[1]}</td><td>{r[2]} {r[3]}</td><td>{r[4] || "—"}</td><td>{r[5]}</td></tr>
+              ))}
+            </tbody>
+          </table>
+          {plan.validation.nutrient_balance && (
+            <p className="req-row">
+              <strong>Nutrient balance of plan:</strong> {plan.validation.nutrient_balance.verdict}
+              {plan.validation.nutrient_balance.issues.length > 0 && ` — ${plan.validation.nutrient_balance.issues.join("; ")}`}
+            </p>
+          )}
+          <button className="analyze-btn secondary-btn" onClick={() => downloadCsv("nutrisl-meal-plan-evaluation.csv", buildEvaluationRows(plan.validation, "Meal plan"))}>
+            Download plan evaluation (CSV)
+          </button>
+        </>
+      )}
 
       {plan.limitations.length > 0 && (
         <div className="data-gaps">

@@ -1,4 +1,8 @@
+import { buildEvaluationRows, downloadCsv } from "../exportCsv";
+
 const STATUS_CLASS = {
+  Low: "status-deficient",
+  High: "status-excess",
   Deficient: "status-deficient",
   Adequate: "status-adequate",
   Excess: "status-excess",
@@ -11,11 +15,12 @@ function StatusBadge({ status }) {
 
 export default function ResultsPanel({ report }) {
   if (!report) return null;
-  const { anthropometrics: a, energy_requirement, protein_requirement, fibre_requirement, nutrient_status, disease_nutrition_goals, data_gaps } = report;
+  const { age_category, macronutrients = [], nutrient_balance, entry_breakdown = [], anthropometrics: a, energy_requirement, protein_requirement, nutrient_status, disease_nutrition_goals, data_gaps } = report;
 
   return (
     <section className="card results">
       <h2>Analysis results</h2>
+      {age_category && <p className="stat-sub">Age category: {age_category}</p>}
 
       <div className="stat-grid">
         <div className="stat">
@@ -62,12 +67,37 @@ export default function ResultsPanel({ report }) {
           <StatusBadge status={protein_requirement.status} />
         </div>
       )}
-      {fibre_requirement && (
-        <div className="req-row">
-          <strong>Dietary Fibre:</strong> {fibre_requirement.intake_g} g consumed vs{" "}
-          {fibre_requirement.target_g_day} g target{" "}
-          <StatusBadge status={fibre_requirement.status} />
-        </div>
+
+      {macronutrients.length > 0 && (
+        <>
+          <h3>Energy &amp; macronutrients</h3>
+          <table className="nutrient-table">
+            <thead>
+              <tr><th>Nutrient</th><th>Intake</th><th>% energy</th><th>Reference</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {macronutrients.map((m) => (
+                <tr key={m.nutrient} title={m.note ?? ""}>
+                  <td>{m.nutrient}</td>
+                  <td>{m.intake} {m.unit}</td>
+                  <td>{m.energy_pct != null ? `${m.energy_pct}%` : "—"}</td>
+                  <td>{m.reference ?? "—"}</td>
+                  <td><StatusBadge status={m.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {nutrient_balance && (
+            <div className="req-row">
+              <strong>Nutrient balance:</strong>{" "}
+              <span className={`badge ${nutrient_balance.verdict === "Satisfactory" ? "status-adequate" : "status-deficient"}`}>
+                {nutrient_balance.verdict}
+              </span>
+              {nutrient_balance.issues.length > 0 && <ul>{nutrient_balance.issues.map((i, k) => <li key={k}>{i}</li>)}</ul>}
+              <p className="stat-sub">{nutrient_balance.note}</p>
+            </div>
+          )}
+        </>
       )}
 
       <h3>Vitamins &amp; minerals</h3>
@@ -88,6 +118,31 @@ export default function ResultsPanel({ report }) {
           ))}
         </tbody>
       </table>
+
+      {entry_breakdown.length > 0 && (
+        <details className="goal-block">
+          <summary><strong>Per-food calculation (for manual verification)</strong></summary>
+          <table className="nutrient-table">
+            <thead>
+              <tr><th>Food</th><th>g</th><th>Energy</th><th>Protein</th><th>Carb</th><th>Fat</th><th>Fibre</th><th>Na</th><th>K</th><th>Ca</th><th>Fe</th></tr>
+            </thead>
+            <tbody>
+              {entry_breakdown.map((r, i) => (
+                <tr key={i}>
+                  <td>{r.food_name}</td><td>{r.grams}</td>
+                  {["Energy", "Protein", "Carbohydrate", "Total Fat", "Total Dietary Fibre", "Sodium", "Potassium", "Calcium", "Iron"].map((k) => (
+                    <td key={k}>{r.values[k]}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+
+      <button className="analyze-btn secondary-btn" onClick={() => downloadCsv("nutrisl-intake-evaluation.csv", buildEvaluationRows(report, "Diet diary"))}>
+        Download evaluation sheet (CSV)
+      </button>
 
       {disease_nutrition_goals.length > 0 && (
         <>
