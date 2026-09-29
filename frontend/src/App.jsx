@@ -7,7 +7,6 @@ import { api } from "./api";
 import "./App.css";
 
 const DEFAULT_PROFILE = {
-  patient_code: "",
   age_years: 30,
   sex: "Female",
   weight_kg: 60,

@@ -4,16 +4,12 @@ Deficiency and sufficiency analysis module (thesis objective 3).
 Ties together: anthropometrics, DRI lookup, nutrient-code canonicalization, and
 the disease-specific nutrition goals table, into one report per profile+diary.
 """
-import math
-import re
-
 from .anthropometrics import full_anthropometrics, calc_bmr, calc_tee, parse_factor_range
-from .conditions import EXTRA_CONDITIONS
 from .db import get_conn
-from .dri_lookup import parse_age_range_years, lookup_vitamin, lookup_mineral, lookup_protein, lookup_energy
+from .dri_lookup import lookup_vitamin, lookup_mineral, lookup_protein, lookup_energy
 from .nutrient_mapping import CANONICAL_NUTRIENTS, MACRO_CODES, sum_aliases
 from .profile import UserProfile
-from .schemas import IntakeResult, NutrientStatus, DeficiencyReport, MacroStatus
+from .schemas import IntakeResult, NutrientStatus, DeficiencyReport
 
 
 def _to_float(x):
@@ -21,99 +17,6 @@ def _to_float(x):
         return float(x)
     except (TypeError, ValueError):
         return None
-
-
-def _age_category(age: float) -> str:
-    if age < 1:
-        return "Infant (<1 y)"
-    if age < 5:
-        return "Pre-school child (1-4 y)"
-    if age < 18:
-        return "School child / adolescent (5-17 y)"
-    return "Adult" if age < 60 else "Older adult (60+ y)"
-
-
-def _pct_range(text) -> tuple[float, float] | None:
-    nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", str(text or ""))]
-    if len(nums) >= 2:
-        return nums[0], nums[1]
-    return None
-
-
-def _age_row(conn, table: str, profile: UserProfile):
-    """DRI row by age only (macro tables have no sex split; labels mix 'year'/'years')."""
-    age = math.floor(profile.age_years)
-    for row in conn.execute(f"SELECT * FROM {table}"):
-        label = re.sub(r"years?", "years", row["age_group"] or "", flags=re.I)
-        rng = parse_age_range_years(label)
-        if rng and rng[0] <= age <= rng[1]:
-            return dict(row)
-    return None
-
-
-def _range_status(pct: float | None, rng, label: str):
-    if pct is None:
-        return "No reference available", "Energy intake is 0, so % of energy cannot be calculated."
-    if rng is None:
-        return "No reference available", f"No numeric {label} reference range for this age."
-    lo, hi = rng
-    if pct < lo:
-        return "Low", f"{pct:.0f}% of energy is below the {lo:.0f}-{hi:.0f}% range."
-    if pct > hi:
-        return "High", f"{pct:.0f}% of energy is above the {lo:.0f}-{hi:.0f}% range."
-    return "Adequate", f"{pct:.0f}% of energy is within the {lo:.0f}-{hi:.0f}% range."
-
-
-def _macro_block(conn, profile, intake, energy_block, protein_block):
-    """Energy, protein, carbohydrate, fat, fibre - the macro rows of the nutritionist questionnaire."""
-    e_kcal = energy_block["intake_kcal"] if energy_block else sum_aliases(intake.nutrient_totals, [MACRO_CODES["Energy"]])
-    prot = sum_aliases(intake.nutrient_totals, [MACRO_CODES["Protein"]])
-    carb = sum_aliases(intake.nutrient_totals, [MACRO_CODES["Carbohydrate"]])
-    fat = sum_aliases(intake.nutrient_totals, [MACRO_CODES["Total Fat"]])
-    fibre = sum_aliases(intake.nutrient_totals, [MACRO_CODES["Total Dietary Fibre"]])
-    pct = lambda g, k: round(g * k / e_kcal * 100, 1) if e_kcal else None
-
-    carb_row = _age_row(conn, "dri_carbs_fibre", profile)
-    fat_row = _age_row(conn, "dri_fat_fatty_acids", profile)
-    carb_rng = _pct_range(carb_row["total_carb_pct_e"]) if carb_row else None
-    fat_rng = _pct_range(fat_row["total_fat_pct_e"]) if fat_row else None
-    prot_rng = (10.0, 35.0)  # AMDR fallback - no % energy range for protein in the DRI file
-
-    out = []
-    if energy_block:
-        ar = energy_block.get("dri_ar_kcal_day")
-        out.append(MacroStatus(nutrient="Energy", unit="kcal", intake=e_kcal,
-                               reference=f"AR {ar} kcal/day" if ar else None, status=energy_block["status"]))
-    out.append(MacroStatus(
-        nutrient="Protein", unit="g", intake=prot, energy_pct=pct(prot, 4),
-        reference=f"RDA {protein_block['rda_total_g_day']} g/day" if protein_block and protein_block.get("rda_total_g_day") else None,
-        status=protein_block["status"] if protein_block else "No reference available"))
-    s, n = _range_status(pct(carb, 4), carb_rng, "carbohydrate")
-    out.append(MacroStatus(nutrient="Carbohydrate", unit="g", intake=carb, energy_pct=pct(carb, 4),
-                           reference=f"{carb_rng[0]:.0f}-{carb_rng[1]:.0f}% of energy" if carb_rng else None, status=s, note=n))
-    s, n = _range_status(pct(fat, 9), fat_rng, "fat")
-    out.append(MacroStatus(nutrient="Total fat", unit="g", intake=fat, energy_pct=pct(fat, 9),
-                           reference=f"{fat_rng[0]:.0f}-{fat_rng[1]:.0f}% of energy" if fat_rng else None, status=s, note=n))
-    fib_ai = _to_float(carb_row["dietary_fibre_g_day"]) if carb_row else None
-    out.append(MacroStatus(
-        nutrient="Dietary fibre", unit="g", intake=fibre, reference=f"AI {fib_ai} g/day" if fib_ai else None,
-        status=("No reference available" if fib_ai is None else "Deficient" if fibre < fib_ai else "Adequate")))
-
-    # Overall nutrient balance (macro distribution): protein/carb/fat % energy inside their ranges
-    issues = []
-    for m in out:
-        if m.nutrient in ("Protein", "Carbohydrate", "Total fat") and m.energy_pct is not None:
-            rng = prot_rng if m.nutrient == "Protein" else carb_rng if m.nutrient == "Carbohydrate" else fat_rng
-            if rng and not (rng[0] <= m.energy_pct <= rng[1]):
-                issues.append(f"{m.nutrient}: {m.energy_pct}% of energy (range {rng[0]:.0f}-{rng[1]:.0f}%)")
-    if energy_block and energy_block["status"] == "Deficient":
-        issues.append("Energy below requirement")
-    if fib_ai and fibre < fib_ai:
-        issues.append("Fibre below adequate intake")
-    balance = {"verdict": "Satisfactory" if not issues else "Needs review", "issues": issues,
-               "note": "Macro balance uses general age-based ranges; condition-specific targets "
-                       "(e.g. low-carbohydrate plans) may intentionally sit outside them."}
-    return out, balance
 
 
 def _classify(intake_value: float, ar, rda, ul, ai_ri=None, ceiling: bool = False) -> tuple[str, str | None]:
@@ -283,21 +186,15 @@ def analyze(profile: UserProfile, intake: IntakeResult) -> DeficiencyReport:
         ).fetchone()
         if row:
             disease_goals.append(dict(row))
-        elif disease in EXTRA_CONDITIONS:
-            disease_goals.append({"disease_condition": disease,
-                                  "nutrition_goal_text": EXTRA_CONDITIONS[disease]["goal_text"]})
         else:
             data_gaps.append(
                 f"Disease condition '{disease}' does not exactly match any entry in "
                 f"disease_nutrition_goals — check GET /diseases for valid values."
             )
 
-    macros, balance = _macro_block(conn, profile, intake, energy_block, protein_block)
     conn.close()
 
     return DeficiencyReport(
-        age_category=_age_category(profile.age_years), macronutrients=macros,
-        nutrient_balance=balance, entry_breakdown=intake.entry_breakdown,
         anthropometrics=anthro,
         energy_requirement=energy_block,
         protein_requirement=protein_block,

@@ -32,7 +32,6 @@ class IntakeResult(BaseModel):
     resolved_entries: list[EntryResolution]
     nutrient_totals: list[NutrientTotal]
     unresolved_entries: list[dict]  # {food_code, quantity, unit, error}
-    entry_breakdown: list[dict] = []  # per-food key nutrients, for manual verification
 
 
 class NutrientStatus(BaseModel):
@@ -47,21 +46,7 @@ class NutrientStatus(BaseModel):
     note: str | None = None
 
 
-class MacroStatus(BaseModel):
-    nutrient: str
-    unit: str
-    intake: float
-    energy_pct: float | None = None
-    reference: str | None = None
-    status: str
-    note: str | None = None
-
-
 class DeficiencyReport(BaseModel):
-    age_category: str = ""
-    macronutrients: list[MacroStatus] = []
-    nutrient_balance: dict | None = None  # {verdict, issues}
-    entry_breakdown: list[dict] = []
     anthropometrics: dict
     energy_requirement: dict | None
     protein_requirement: dict | None
@@ -85,6 +70,4 @@ class MealPlanResult(BaseModel):
     meals: dict[str, list[MealPlanItem]]
     items: list[MealPlanItem]
     validation: DeficiencyReport | None  # the generated plan run back through calculate_intake+analyze
-    target_energy_kcal: float | None = None
-    portion_scale_factor: float | None = None
     limitations: list[str]  # goal-text items this engine could not enforce, GI-match coverage, etc.

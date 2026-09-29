@@ -36,13 +36,6 @@ export default function ProfileForm({ profile, setProfile }) {
       <h2>Patient profile</h2>
       <div className="grid-2">
         <label>
-          Patient code
-          <input
-            type="text" placeholder="e.g. P-001" value={profile.patient_code ?? ""}
-            onChange={(e) => update("patient_code", e.target.value)}
-          />
-        </label>
-        <label>
           Age (years)
           <input
             type="number" min="0" max="120" value={profile.age_years}
@@ -118,7 +111,7 @@ export default function ProfileForm({ profile, setProfile }) {
       </div>
 
       <div className="disease-list">
-        <p className="field-label">Disease / condition and diet-related comorbidities (select any that apply)</p>
+        <p className="field-label">Disease / condition (select any that apply)</p>
         <div className="checkbox-grid">
           {diseases.map((d) => (
             <label key={d} className="checkbox-item">
