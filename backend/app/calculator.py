@@ -7,6 +7,7 @@ scales it, and aggregates total daily intake per nutrient across all entries.
 """
 from collections import defaultdict
 
+from .cooking_yield import adjust_value
 from .db import get_conn
 from .portions import to_grams, PortionConversionError
 from .schemas import DiaryInput, EntryResolution, IntakeResult, NutrientTotal
@@ -47,14 +48,21 @@ def calculate_intake(diary: DiaryInput) -> IntakeResult:
             quantity=entry.quantity, unit=entry.unit, grams=grams, meal=entry.meal,
         ))
 
-        # nutrient values in the DB are per 100g edible portion
+        # nutrient values in the DB are per 100g edible portion, RAW — see
+        # cooking_yield.py for why Cereals & Grains / Legumes & Pulses get adjusted
+        # here before scaling by the diary's (cooked) quantity.
         scale = grams / 100.0
         nutrient_rows = cur.execute(
-            "SELECT nutrient_code, value FROM food_nutrients WHERE food_code = ?",
+            """
+            SELECT fn.nutrient_code, fn.value, f.food_group
+            FROM food_nutrients fn JOIN foods f ON f.food_code = fn.food_code
+            WHERE fn.food_code = ?
+            """,
             (entry.food_code,),
         ).fetchall()
         for nrow in nutrient_rows:
-            totals[nrow["nutrient_code"]] += nrow["value"] * scale
+            value = adjust_value(nrow["value"], nrow["food_group"])
+            totals[nrow["nutrient_code"]] += value * scale
 
     # attach names/units from the dictionary
     nutrient_totals: list[NutrientTotal] = []

@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .calculator import calculate_intake, search_foods
+from .cooking_yield import adjust_value, RAW_FOOD_GROUPS_NEEDING_YIELD_ADJUSTMENT
 from .db import get_conn
 from .deficiency import analyze
 from .meal_planning import generate_meal_plan
@@ -54,11 +55,20 @@ def get_food(food_code: str):
         (food_code,),
     ).fetchall()
     conn.close()
+    is_adjusted = food["food_group"] in RAW_FOOD_GROUPS_NEEDING_YIELD_ADJUSTMENT
+    nutrients_out = []
+    for n in nutrients:
+        row = dict(n)
+        row["value"] = adjust_value(row["value"], food["food_group"])
+        nutrients_out.append(row)
     return {
         "food_code": food["food_code"],
         "food_name": food["food_name"],
         "food_group": food["food_group"],
-        "nutrients_per_100g": [dict(n) for n in nutrients],
+        "nutrients_per_100g": nutrients_out,
+        "cooking_yield_adjusted": is_adjusted,  # see cooking_yield.py — True means
+        # these values were divided to approximate cooked-state density, not the
+        # raw source-table figures
     }
 
 

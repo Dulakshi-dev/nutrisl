@@ -22,6 +22,7 @@ feeding (Galactocemia in neonates) — those two are refused outright rather tha
 faked, see PKU_DISEASE / INFANT_ONLY_DISEASE below.
 """
 from .calculator import calculate_intake
+from .cooking_yield import adjust_value
 from .db import get_conn
 from .deficiency import analyze
 from .nutrient_mapping import MACRO_CODES
@@ -227,10 +228,19 @@ def _name_has_any(name: str, keywords: set) -> bool:
 
 def _fetch_candidates(conn, profile: UserProfile, rules: dict) -> list[dict]:
     foods = conn.execute("SELECT food_code, food_name, food_group FROM foods").fetchall()
-    nutrient_rows = conn.execute("SELECT food_code, nutrient_code, value FROM food_nutrients").fetchall()
+    # Joined with foods here (not a plain food_nutrients select) so the cooking-yield
+    # adjustment (see cooking_yield.py) can be applied per food_group while building
+    # this map — otherwise scoring would rank Cereals & Grains / Legumes & Pulses
+    # using inflated raw nutrient density, inconsistent with what calculate_intake
+    # actually reports to the user.
+    nutrient_rows = conn.execute(
+        "SELECT fn.food_code, fn.nutrient_code, fn.value, f.food_group "
+        "FROM food_nutrients fn JOIN foods f ON f.food_code = fn.food_code"
+    ).fetchall()
     nutrients_by_food: dict[str, dict] = {}
     for r in nutrient_rows:
-        nutrients_by_food.setdefault(r["food_code"], {})[r["nutrient_code"]] = r["value"]
+        adjusted = adjust_value(r["value"], r["food_group"])
+        nutrients_by_food.setdefault(r["food_code"], {})[r["nutrient_code"]] = adjusted
 
     excluded_by_pref = set()
     if profile.dietary_preference == "vegetarian":
