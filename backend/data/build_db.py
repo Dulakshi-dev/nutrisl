@@ -258,6 +258,8 @@ def ingest_food_composition(conn):
                 continue
             food_code = str(row[0]).strip()
             food_name = str(row[1]).strip() if row[1] else ""
+            if not food_name:
+                continue  # category header rows (e.g. "Meats", "Dried Fish"), not foods
             food_rows.append((food_code, food_name, group_label))
             for idx, code in col_meta:
                 val = clean_value(row[idx]) if idx < len(row) else None

@@ -19,6 +19,14 @@ def _to_float(x):
         return None
 
 
+# Only these nutrients' tolerable upper intake levels are applied to FOOD intake. The DRI ULs
+# for magnesium, folate, vitamin E, B6, niacin, vitamin C ... are defined for supplements /
+# fortificants (the magnesium UL of 350 mg is even below its RDA, so any adequate diet was
+# flagged "Excess"). Same list as FOOD_UL in the ML pipeline's core.py (fat is handled there
+# as a macro; the app reports macros separately).
+FOOD_UL_NUTRIENTS = {"Vitamin A", "Vitamin D", "Calcium", "Zinc", "Selenium"}
+
+
 def _classify(intake_value: float, ar, rda, ul, ai_ri=None, ceiling: bool = False) -> tuple[str, str | None]:
     """
     ceiling=True flips the interpretation for nutrients (currently just Sodium) whose
@@ -167,7 +175,8 @@ def analyze(profile: UserProfile, intake: IntakeResult) -> DeficiencyReport:
             rda = rda_f * scale if rda_f is not None else None
             ai_ri = ai_f * scale if ai_f is not None else None
 
-        status, note = _classify(intake_value, ar, rda, ul, ai_ri, ceiling=canon_name in CEILING_NUTRIENTS)
+        ul_for_status = ul if canon_name in FOOD_UL_NUTRIENTS else None  # supplement-only UL: not an "excess" for food
+        status, note = _classify(intake_value, ar, rda, ul_for_status, ai_ri, ceiling=canon_name in CEILING_NUTRIENTS)
         if canon_name in PER_KCAL_NUTRIENTS and note:
             note += f" (converted from a per-kcal DRI factor using this profile's energy AR of {energy_ar_kcal} kcal/day.)"
         nutrient_status.append(NutrientStatus(

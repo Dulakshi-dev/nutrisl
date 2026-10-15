@@ -119,7 +119,13 @@ def lookup_protein(conn, profile: UserProfile):
 
 def lookup_energy(conn, profile: UserProfile):
     rows = conn.execute("SELECT * FROM dri_energy").fetchall()
-    candidates = [r for r in rows if row_matches_profile(r["age"], r["sex"], profile)]
+    # Match on life_stage + age together: the lactation row's age text is just "First 6 months"
+    # (life_stage = "Lactation"), which on its own looks like a plain age range and was
+    # never matched, so lactating profiles got no energy target.
+    candidates = [
+        r for r in rows
+        if row_matches_profile(f"{r['life_stage'] or ''} {r['age'] or ''}".strip(), r["sex"], profile)
+    ]
     if not candidates:
         return None
     # Prefer the row matching the profile's PAL category; fall back to the first match
