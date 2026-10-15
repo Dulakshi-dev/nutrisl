@@ -21,6 +21,8 @@ and anything requiring amino-acid-level detail (Phenylketonuria) or infant-speci
 feeding (Galactocemia in neonates) — those two are refused outright rather than
 faked, see PKU_DISEASE / INFANT_ONLY_DISEASE below.
 """
+import re
+
 from .calculator import calculate_intake
 from .cooking_yield import adjust_value
 from .db import get_conn
@@ -49,7 +51,7 @@ DISEASE_RULES = {
                          "are population heuristics, not a prescribed clinical limit"],
     },
     "Celiac disease": {
-        "exclude_name_keywords": ["wheat", "atta", "maida", "semolina", "rava", "barley", "rye"],
+        "exclude_name_keywords": ["wheat", "atta", "maida", "semolina", "rava", "barley", "rye", "triticum"],
         "unsupported": ["not a certified gluten-free guarantee — no allergen/cross-contamination data exists"],
     },
     "Lactose intolerance": {
@@ -99,7 +101,14 @@ DISEASE_RULES = {
     },
     "Phenylketone uria": {"pku": True, "unsupported": []},
     "Thalassemia": {
-        "avoid_nutrient": "Iron", "priority_nutrient_boost": ["Calcium", "Vitamin D", "Folate (B9)", "Magnesium"],
+        "avoid_nutrient": "Iron",
+        # "Avoid iron-rich foods" used to be only a score penalty, which the Calcium/Folate/
+        # Magnesium boosts easily outweighed (e.g. black gingely seeds, 15 mg iron/100 g, were
+        # still picked). Now also a hard cap; 3 mg/100 g is a heuristic cutoff (cooking-adjusted)
+        # that removes liver, sesame, spices, tamarind and iron-dense leaves but keeps 9/10
+        # legumes and most fish, cereals and vegetables.
+        "max_iron_mg_100g": 3.0,
+        "priority_nutrient_boost": ["Calcium", "Vitamin D", "Folate (B9)", "Magnesium"],
         "unsupported": ["'avoid vitamin C with iron-rich food' is a meal-pairing/timing rule, "
                          "not a single-food property this engine models"],
     },
@@ -125,6 +134,74 @@ PLANT_PROTEIN_GROUPS = ["Legumes & Pulses"]
 # regardless of how the scoring leans, rather than tuning scores to fight that tendency.
 ANIMAL_PROTEIN_GROUPS = ["Fish & Aquatic", "Eggs, Poultry & Meat"]
 PLANT_PROTEIN_GROUPS = ["Legumes & Pulses"]
+
+# ---------------------------------------------------------------------------
+# Allergen handling. A raw substring match on the user's allergy text is NOT safe:
+# "shellfish" never appears in "Baby shrimps (karandi spp)" / "Prawn, ..." / "Crab, ...",
+# and "peanut" never appears in "Ground nut (Arachis hypogaea)". Each known allergen is
+# therefore expanded to the names the food table actually uses. `groups` limits where the
+# keywords may match (so "egg" doesn't hit "Brinjal, Chinese eggplant" and "oyster"
+# doesn't hit "Mushroom, Oyster"); groups with keywords=None are excluded wholesale.
+# Unknown allergy text falls back to the old case-insensitive substring match.
+# ---------------------------------------------------------------------------
+_WHEAT_KEYWORDS = ["wheat", "atta", "maida", "semolina", "rava", "barley", "rye", "triticum"]
+ALLERGEN_RULES = {
+    "shellfish": {"groups": ["Fish & Aquatic"], "keywords": [
+        "shellfish", "shell fish", "shrimp", "prawn", "crab", "lobster", "squid", "cuttlefish",
+        "octopus", "oyster", "mussel", "clam", "karandi"]},
+    "fish": {"groups": ["Fish & Aquatic"], "keywords": None},  # whole group (incl. shellfish)
+    "peanut": {"groups": None, "keywords": ["peanut", "ground nut", "groundnut", "arachis"]},
+    "tree nut": {"groups": None, "keywords": [
+        "almond", "cashew", "pistachio", "walnut", "hazelnut", "pecan", "macadamia"]},
+    "egg": {"groups": ["Eggs, Poultry & Meat"], "keywords": ["egg"]},
+    "milk": {"groups": ["Milk & Dairy Products"], "keywords": None},
+    "sesame": {"groups": None, "keywords": ["sesame", "sesamum", "gingely"]},
+    "soy": {"groups": None, "keywords": ["soy", "soya"]},
+    "mustard": {"groups": None, "keywords": ["mustard"]},
+    "wheat": {"groups": None, "keywords": _WHEAT_KEYWORDS},
+}
+ALLERGEN_ALIASES = {
+    "shell fish": ["shellfish"], "crustacean": ["shellfish"], "crustaceans": ["shellfish"],
+    "seafood": ["fish"], "sea food": ["fish"],
+    "peanuts": ["peanut"], "groundnut": ["peanut"], "groundnuts": ["peanut"],
+    "ground nut": ["peanut"], "ground nuts": ["peanut"],
+    "tree nuts": ["tree nut"], "tree nut": ["tree nut"],
+    "nut": ["peanut", "tree nut"], "nuts": ["peanut", "tree nut"],
+    "eggs": ["egg"], "dairy": ["milk"], "cow's milk": ["milk"], "cows milk": ["milk"],
+    "lactose": ["milk"], "soya": ["soy"], "sesame seeds": ["sesame"],
+    "gluten": ["wheat"], "celiac": ["wheat"],
+}
+
+# Foods in the Milk group that are fats/sweeteners, not protein sources — they must not be
+# picked for a protein slot (a kidney-disease plan was getting 100 g of ghee as its "protein").
+NON_PROTEIN_NAME_KEYWORDS = {"ghee", "butter", "condensed"}
+PROTEIN_ROLES = {"protein", "animal_protein", "plant_protein"}
+
+
+def _resolve_allergens(allergies: list[str]) -> tuple[list[str], list[str]]:
+    """Split the user's allergy strings into (known allergen keys, unknown raw terms)."""
+    known, unknown = [], []
+    for raw in allergies:
+        term = raw.strip().lower()
+        if not term:
+            continue
+        keys = ALLERGEN_ALIASES.get(term) or ([term] if term in ALLERGEN_RULES else None)
+        if keys:
+            known.extend(k for k in keys if k not in known)
+        else:
+            unknown.append(term)
+    return known, unknown
+
+
+def _matches_allergen(name: str, group: str, key: str) -> bool:
+    rule = ALLERGEN_RULES[key]
+    if rule["groups"] and group not in rule["groups"]:
+        return False
+    if rule["keywords"] is None:
+        return True
+    name_l = name.lower()
+    return any(re.search(rf"\b{re.escape(kw)}s?\b", name_l) for kw in rule["keywords"])
+
 
 # Fixed, standard-portion approach (per your decision) — same caveat as portions.py:
 # these are generic reasonable serving sizes, not a validated Sri Lankan portion
@@ -189,6 +266,7 @@ def _merge_rules(diseases: list[str]) -> dict:
     merged = {
         "max_sodium_mg_100g": None, "max_potassium_mg_100g": None, "max_phosphorus_mg_100g": None,
         "max_fat_g_100g": None, "max_fiber_g_100g": None, "max_gi": None,
+        "max_iron_mg_100g": None,
         "fiber_bonus_weight": 0.0, "carb_penalty_weight": 0.0, "boost_omega3": False,
         "prefer_protein_groups": False, "exclude_food_groups": set(), "exclude_name_keywords": set(),
         "keep_name_keywords": set(), "boost_name_keywords": set(),
@@ -200,7 +278,7 @@ def _merge_rules(diseases: list[str]) -> dict:
         if not rules:
             continue
         for cap_key in ("max_sodium_mg_100g", "max_potassium_mg_100g", "max_phosphorus_mg_100g",
-                         "max_fat_g_100g", "max_fiber_g_100g", "max_gi"):
+                         "max_fat_g_100g", "max_fiber_g_100g", "max_gi", "max_iron_mg_100g"):
             if rules.get(cap_key) is not None:
                 cur = merged[cap_key]
                 merged[cap_key] = rules[cap_key] if cur is None else min(cur, rules[cap_key])
@@ -250,11 +328,16 @@ def _fetch_candidates(conn, profile: UserProfile, rules: dict) -> list[dict]:
     elif profile.dietary_preference == "pescatarian":
         excluded_by_pref |= {"Eggs, Poultry & Meat"}
 
-    dislikes = set(profile.food_dislikes) | set(profile.food_allergies)
+    allergen_keys, unknown_allergy_terms = _resolve_allergens(profile.food_allergies)
+    dislikes = set(profile.food_dislikes) | set(unknown_allergy_terms)
 
     candidates = []
     for f in foods:
         code, name, group = f["food_code"], f["food_name"], f["food_group"]
+        # The food table also contains category header rows (e.g. code "Meats",
+        # "Dried Fish") with an empty name and no nutrients. They are not foods.
+        if not (name or "").strip() or not re.fullmatch(r"SL[A-Z]\d+", code or ""):
+            continue
         nutrients = nutrients_by_food.get(code, {})
 
         if group in rules["exclude_food_groups"] and not _name_has_any(name, rules["keep_name_keywords"]):
@@ -262,6 +345,8 @@ def _fetch_candidates(conn, profile: UserProfile, rules: dict) -> list[dict]:
         if group in excluded_by_pref:
             continue
         if _name_has_any(name, dislikes):
+            continue
+        if any(_matches_allergen(name, group, k) for k in allergen_keys):
             continue
         if _name_has_any(name, rules["exclude_name_keywords"]):
             continue
@@ -274,6 +359,9 @@ def _fetch_candidates(conn, profile: UserProfile, rules: dict) -> list[dict]:
             continue
         phosphorus = nutrients.get("P")
         if rules["max_phosphorus_mg_100g"] is not None and phosphorus is not None and phosphorus > rules["max_phosphorus_mg_100g"]:
+            continue
+        iron = nutrients.get("FE")
+        if rules["max_iron_mg_100g"] is not None and iron is not None and iron > rules["max_iron_mg_100g"]:
             continue
         fat = nutrients.get(MACRO_CODES["Total Fat"])
         if rules["max_fat_g_100g"] is not None and fat is not None and fat > rules["max_fat_g_100g"]:
@@ -409,7 +497,12 @@ def generate_meal_plan(profile: UserProfile, diary: DiaryInput) -> MealPlanResul
     for meal_name, slots in MEAL_TEMPLATES.items():
         meal_items = []
         for slot in slots:
-            eligible = [c for c in candidates if c["food_group"] in slot["groups"] and c["food_code"] not in used_codes]
+            is_protein_slot = slot["role"] in PROTEIN_ROLES
+            eligible = [
+                c for c in candidates
+                if c["food_group"] in slot["groups"] and c["food_code"] not in used_codes
+                and not (is_protein_slot and _name_has_any(c["food_name"], NON_PROTEIN_NAME_KEYWORDS))
+            ]
             if not eligible:
                 continue
             scored = sorted(eligible, key=lambda c: _score_candidate(c, deficient_targets, rules, gi_lookup), reverse=True)
